@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE eagle SYSTEM "eagle.dtd">
-<eagle version="8.6.0">
+<eagle version="7.7.0">
 <drawing>
 <settings>
 <setting alwaysvectorfont="no"/>
@@ -3405,6 +3405,10 @@ You are welcome to use this library for commercial purposes. For attribution, we
 <part name="DISTANCE_SENSOR" library="custom" deviceset="SHARP_DISTANCE" device=""/>
 <part name="EMERGENCY" library="adafruit" deviceset="SWITCH_PUSHBUTTON" device="SOFTTOUCHSMD_SJ"/>
 <part name="U$1" library="custom" deviceset="HX711_CARRIER" device=""/>
+<part name="BUMPER1" library="adafruit" deviceset="SWITCH_PUSHBUTTON" device="SOFTTOUCHSMD_SJ"/>
+<part name="BUMPER2" library="adafruit" deviceset="SWITCH_PUSHBUTTON" device="SOFTTOUCHSMD_SJ"/>
+<part name="BUMPER3" library="adafruit" deviceset="SWITCH_PUSHBUTTON" device="SOFTTOUCHSMD_SJ"/>
+<part name="R2" library="SparkFun-Resistors" deviceset="100OHM" device="-HORIZ_KIT-1/4W-1%" value="100"/>
 </parts>
 <sheets>
 <sheet>
@@ -3439,6 +3443,10 @@ You are welcome to use this library for commercial purposes. For attribution, we
 <instance part="DISTANCE_SENSOR" gate="G$1" x="-81.28" y="40.64"/>
 <instance part="EMERGENCY" gate="G$1" x="20.32" y="106.68"/>
 <instance part="U$1" gate="G$1" x="-101.6" y="7.62"/>
+<instance part="BUMPER1" gate="G$1" x="60.96" y="-25.4" rot="R270"/>
+<instance part="BUMPER2" gate="G$1" x="71.12" y="-25.4" rot="R270"/>
+<instance part="BUMPER3" gate="G$1" x="81.28" y="-25.4" rot="R270"/>
+<instance part="R2" gate="G$1" x="53.34" y="-12.7"/>
 </instances>
 <busses>
 </busses>
@@ -3522,6 +3530,18 @@ You are welcome to use this library for commercial purposes. For attribution, we
 <pinref part="U$1" gate="G$1" pin="GND"/>
 <wire x1="-88.9" y1="2.54" x2="-78.74" y2="2.54" width="0.1524" layer="91"/>
 <label x="-81.28" y="2.54" size="1.778" layer="95"/>
+</segment>
+<segment>
+<pinref part="BUMPER3" gate="G$1" pin="P$2"/>
+<wire x1="81.28" y1="-30.48" x2="81.28" y2="-35.56" width="0.1524" layer="91"/>
+<wire x1="81.28" y1="-35.56" x2="71.12" y2="-35.56" width="0.1524" layer="91"/>
+<pinref part="BUMPER1" gate="G$1" pin="P$2"/>
+<wire x1="71.12" y1="-35.56" x2="60.96" y2="-35.56" width="0.1524" layer="91"/>
+<wire x1="58.42" y1="-35.56" x2="60.96" y2="-35.56" width="0.1524" layer="91"/>
+<wire x1="60.96" y1="-35.56" x2="60.96" y2="-30.48" width="0.1524" layer="91"/>
+<pinref part="BUMPER2" gate="G$1" pin="P$2"/>
+<wire x1="71.12" y1="-30.48" x2="71.12" y2="-35.56" width="0.1524" layer="91"/>
+<label x="53.34" y="-35.56" size="1.778" layer="95"/>
 </segment>
 </net>
 <net name="BATT" class="0">
@@ -3671,6 +3691,11 @@ You are welcome to use this library for commercial purposes. For attribution, we
 <wire x1="-83.82" y1="10.16" x2="-83.82" y2="12.7" width="0.1524" layer="91"/>
 <junction x="-83.82" y="12.7"/>
 <label x="-81.28" y="12.7" size="1.778" layer="95"/>
+</segment>
+<segment>
+<pinref part="R2" gate="G$1" pin="1"/>
+<wire x1="48.26" y1="-12.7" x2="45.72" y2="-12.7" width="0.1524" layer="91"/>
+<label x="43.18" y="-12.7" size="1.778" layer="91"/>
 </segment>
 </net>
 <net name="A2" class="0">
@@ -4027,6 +4052,24 @@ You are welcome to use this library for commercial purposes. For attribution, we
 <wire x1="5.08" y1="106.68" x2="15.24" y2="106.68" width="0.1524" layer="91"/>
 <wire x1="15.24" y1="116.84" x2="15.24" y2="106.68" width="0.1524" layer="91"/>
 <junction x="15.24" y="106.68"/>
+</segment>
+</net>
+<net name="43" class="0">
+<segment>
+<pinref part="BUMPER1" gate="G$1" pin="P$1"/>
+<wire x1="60.96" y1="-20.32" x2="58.42" y2="-20.32" width="0.1524" layer="91"/>
+<pinref part="BUMPER2" gate="G$1" pin="P$1"/>
+<wire x1="60.96" y1="-20.32" x2="71.12" y2="-20.32" width="0.1524" layer="91"/>
+<pinref part="BUMPER3" gate="G$1" pin="P$1"/>
+<wire x1="71.12" y1="-20.32" x2="81.28" y2="-20.32" width="0.1524" layer="91"/>
+<wire x1="81.28" y1="-20.32" x2="81.28" y2="-12.7" width="0.1524" layer="91"/>
+<wire x1="81.28" y1="-12.7" x2="71.12" y2="-12.7" width="0.1524" layer="91"/>
+<wire x1="71.12" y1="-12.7" x2="71.12" y2="-20.32" width="0.1524" layer="91"/>
+<wire x1="71.12" y1="-12.7" x2="60.96" y2="-12.7" width="0.1524" layer="91"/>
+<wire x1="60.96" y1="-12.7" x2="60.96" y2="-20.32" width="0.1524" layer="91"/>
+<wire x1="60.96" y1="-12.7" x2="58.42" y2="-12.7" width="0.1524" layer="91"/>
+<pinref part="R2" gate="G$1" pin="2"/>
+<label x="53.34" y="-20.32" size="1.778" layer="95"/>
 </segment>
 </net>
 </nets>
