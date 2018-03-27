@@ -17,6 +17,8 @@
 void checkBattery();
 int getBatteryPercentage();
 void checkBumper();
+void checkFluid();
+void checkRow(); 
 void calibrateLineTracker();
 void storeLineTracker();
 void recallLineTracker();
@@ -25,19 +27,25 @@ void tunePID();
 
 // Define digital and analog pins
 const int Battery_Pin = A0;
+const int IR_Pin = A1; 
 const int Bumper_Pin = 33;
+const int Fluid_Pin = 27;
 const int Status_LED = 25;
 
 
 // Define program flags
 int LowBattery_Flag = 0;
 int Collision_Flag = 0;
+int LowFluid_Flag = 0;
+int Row_Flag = 0;
 
 
 // Define variables
 int Debug_Variable; // Misc variable for debugging sensors
 int Program_State = 0; // Program state. Flags cause the program to switch between states
 int Bumper_State = 1, Bumper_PrevState = 1; // Bumper switches are normally closed
+int Fluid_State = 0, Fluid_PrevState = 0; // Fluid Level switch is normally closed, but kept low by the fluid tank
+int Row_Level[] = { 300, 300, 300 }; // IR sensor has range between 80-500 (10-80 cm)
 int Battery_Level = 1000, Battery_PrevLevel = 1000; // Acceptable battery level is 900-1024 (11-12.5V)
 int Line_Position;
 float Line_Position_Scaled;
@@ -110,6 +118,7 @@ void setup() {
 
   pinMode(Battery_Pin, INPUT);
   pinMode(Bumper_Pin, INPUT);
+  pinMode(Fluid_Pin, INPUT);
   pinMode(Status_LED, OUTPUT);
 
   //calibrateLineTracker();
@@ -257,13 +266,19 @@ void checkBumper() {
   Bumper_State = digitalRead(Bumper_Pin);
 
   if (Bumper_PrevState != Bumper_State) { // If switch state changes
-    if (Bumper_State == 0) { // Bumper switches are normally closed (Collision = 0)
-      // Serial.println("Bumper Pressed")
+    if (Bumper_State == 0) { // Bumper switches are normally closed (Collision = 0)    
       Collision_Flag = 1;
     }
-    else {
-      // Serial.println("Bumper Released");
-      // Collision_Flag = 0;
+  }
+}
+
+void checkFluid() {
+  Fluid_PrevState = Fluid_State;
+  Fluid_State = digitalRead(Fluid_Pin);
+
+  if (Fluid_PrevState != Fluid_State) { // If switch state changes
+    if (Fluid_State == 1) { // Fluid level switch is normally closed, and goes HIGH when tank gets empty.    
+      LowFluid_Flag = 1;
     }
   }
 }
