@@ -20,11 +20,13 @@ void checkBumper();
 void calibrateLineTracker();
 void storeLineTracker();
 void recallLineTracker();
+void tunePID();
 
 
 // Define digital and analog pins
 const int Battery_Pin = A0;
 const int Bumper_Pin = 33;
+const int Status_LED = 25;
 
 
 // Define program flags
@@ -34,19 +36,20 @@ int Collision_Flag = 0;
 
 // Define variables
 int Debug_Variable; // Misc variable for debugging sensors
-int Program_State = 0; // Program state. Flags cause the program to switch between states.
+int Program_State = 0; // Program state. Flags cause the program to switch between states
 int Bumper_State = 1, Bumper_PrevState = 1; // Bumper switches are normally closed
-int Battery_Level;
+int Battery_Level = 1000, Battery_PrevLevel = 1000; // Acceptable battery level is 900-1024 (11-12.5V)
 int Line_Position;
 float Line_Position_Scaled;
 float Error = 0, Error_Prev = 0, Error_Diff = 0, Error_Sum = 0;
-int Base_Speed = 75, Correction_Speed, RightMotor_Speed, LeftMotor_Speed;
+int Correction_Speed, RightMotor_Speed, LeftMotor_Speed;
 
 
 // Define constant variables
-const float Kp = 0.8;
-const float Ki = 0;
-const float Kd = 0;
+float Kp = 5;
+float Ki = 0;
+float Kd = 0;
+int Base_Speed = 200;
 const int Sample_Time = 50;
 const int Line_Position_Max = 6000;
 
@@ -107,8 +110,14 @@ void setup() {
 
   pinMode(Battery_Pin, INPUT);
   pinMode(Bumper_Pin, INPUT);
+  pinMode(Status_LED, OUTPUT);
 
-  calibrateLineTracker();
+  //calibrateLineTracker();
+  //storeLineTracker();
+  recallLineTracker();
+  digitalWrite(Status_LED, HIGH);
+  delay(100);
+  digitalWrite(Status_LED, LOW);
 
 }
 
@@ -116,33 +125,35 @@ void loop() {
 
   // Checking program flags, switching state if required (No time slicing implemented yet)
 
-  checkBumper();
+  checkBumper(); // Check for bumper collisions
   if (Collision_Flag == 1) {
+    Serial.println("Collision Detected");
     //Program_State = 0; // If collision occurs, pause all action
-    Program_State = ++Program_State % 2;  // Increment, roll over at n-1
+    Program_State = ++Program_State % 3;  // Increment, roll over at n-1 (for testing)
     Collision_Flag = 0; // Reset flag after servicing
-
   }
 
-  //checkBattery();
-  if (LowBattery_Flag == 1) { // If battery is low, pause all action
-    Program_State = 3;
+ checkBattery(); // Check for low battery warning
+  if (LowBattery_Flag == 1) {
+    Program_State = 2;
     LowBattery_Flag = 0;
   }
 
+  if (Program_State == 2) {
+    digitalWrite(Status_LED, HIGH);
+  } else {
+    digitalWrite(Status_LED, LOW);
+  }
 
 
   switch (Program_State) {
 
-    case 0: // Stationary Robot. Used for alarm flags, user interaction, and startup.
-      //Serial.println("Case 0");
+    case 0: // Stationary Robot.
+
       brake(RightMotor, LeftMotor);
 
-      break;
+      tunePID();
 
-    case 2:
-      //Serial.println("case 1");
-      // forward(RightMotor, LeftMotor, 100);
       break;
 
     case 1: // Line Tracking
@@ -171,31 +182,47 @@ void loop() {
       // Calculate Correction_Speed (bounded between 0-100) using PID
       Correction_Speed = (int)( (Kp * Error + Ki * Error_Sum + Kd * Error_Diff) * 100 );
 
-      Serial.println(Correction_Speed);
+
       // Set drive motor speeds, constrained to forward motion
       RightMotor_Speed = Base_Speed - Correction_Speed;
       if (RightMotor_Speed < 0) {
         RightMotor_Speed = 0;
+      } else if (RightMotor_Speed > 255) {
+        RightMotor_Speed = 255;
       }
 
       LeftMotor_Speed = Base_Speed + Correction_Speed;
       if (LeftMotor_Speed < 0) {
         LeftMotor_Speed = 0;
+      } else if (LeftMotor_Speed > 255) {
+        LeftMotor_Speed = 255;
       }
+
 
       RightMotor.drive(RightMotor_Speed);
       LeftMotor.drive(LeftMotor_Speed);
 
+      /*
+            Serial.print(LeftMotor_Speed);
+            Serial.print("      ");
+            Serial.println(RightMotor_Speed);
+      */
       break;
 
 
-    case 3: // Low Battery State. Pause all actions and warn user of low battery
+    case 2: // Low Battery State. Pause all actions and warn user of low battery
+      brake(RightMotor, LeftMotor);
 
+      Serial.print("Battery Level: ");
+      Serial.print(Battery_Level);
+      Serial.print("      Battery %: ");
+      Serial.print(getBatteryPercentage());
       if ( Battery_Level < 762 ) {
-        Serial.println("Battery critically low!!!");
+        Serial.println("%   Battery critically low!");
       }
-      else Serial.println(getBatteryPercentage());
-
+      else {
+        Serial.println("%");
+      }
 
       break;
 
@@ -206,9 +233,12 @@ void loop() {
 }
 
 void checkBattery() {
+  Battery_PrevLevel = Battery_Level;
   Battery_Level = analogRead(Battery_Pin);
-  // If voltage drops to 9.3V, ie. Arduino reads 3.72V, set flag
-  if (Battery_Level < 762) { // 762/1024*5V = 3.721V
+
+  // If voltage drops to 11V, ie. Arduino reads 4.4V, set flag (75% depleted, nearing dump voltage)
+  // 900/1024*5V = 4.39V
+  if (Battery_Level < 900 && Battery_PrevLevel < 900) { // Check 2 values to denoise signal
     LowBattery_Flag = 1;
   }
   else {
@@ -218,7 +248,7 @@ void checkBattery() {
 
 int getBatteryPercentage() {  // Returns the battery level as a percentage of full charge (Rough estimate: not linearized)
   Battery_Level = analogRead(Battery_Pin);
-  double Battery_Percentage = ((double) Battery_Level - 762) / (1024 - 762) * 100;
+  double Battery_Percentage = ((double) Battery_Level - 900) / (1024 - 900) * 100;
   return (int) Battery_Percentage;
 }
 
@@ -250,7 +280,6 @@ void calibrateLineTracker() {
     qtrrc.calibrate();       // reads all sensors 10 times at 2500 us per read (i.e. ~25 ms per call)
   }
 
-  Serial.println();
   Serial.println("Calibration complete.");
   delay(1000);
 
@@ -270,11 +299,55 @@ void recallLineTracker() {
   Serial.println();
   Serial.println("Recalling Calibration Data from EEPROM...");
 
-  qtrrc.calibrate(); 
+  qtrrc.calibrate();
   EEPROM.readBlock<unsigned int>(addrCalibratedMinimumOn, qtrrc.calibratedMinimumOn, 8);
   EEPROM.readBlock<unsigned int>(addrCalibratedMaximumOn, qtrrc.calibratedMaximumOn, 8);
 
   Serial.println("EEPROM Recall Complete");
+}
+
+void tunePID() {
+
+  if (Serial.available())
+  {
+    char key = Serial.read();
+    if (key == 'P')  {
+      Kp += 0.1;
+    }
+    else if (key == 'p') {
+      Kp -= 0.1;
+    }
+    else if (key == 'I') {
+      Ki += 0.1;
+    }
+    else if (key == 'i') {
+      Ki -= 0.1;
+    }
+    else if (key == 'D') {
+      Kp += 0.1;
+    }
+    else if (key == 'd') {
+      Kp -= 0.1;
+    }
+    else if (key == 'B') {
+      Base_Speed += 10;
+    }
+    else if (key == 'b') {
+      Base_Speed -= 10;
+    }
+
+    Serial.print("Base Speed: ");
+    Serial.print(Base_Speed);
+    Serial.print("    Kp: ");
+    Serial.print(Kp);
+    Serial.print("    Ki: ");
+    Serial.print(Ki);
+    Serial.print("    Kd: ");
+    Serial.println(Kd);
+
+
+  }
+
 }
 
 
