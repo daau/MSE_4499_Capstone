@@ -1,4 +1,4 @@
-;''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''/*
+; ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''/*
 
   MSE 4499 Line Tracking Code for Betta Feeder Robot
   Language: Arduino
@@ -18,8 +18,8 @@ void checkBattery();
 int getBatteryPercentage();
 void checkBumper();
 void checkFluid();
-void checkRowDetector(); 
-void calibrateRowDetector(); 
+void checkRowDetector();
+void calibrateRowDetector();
 void calibrateLineTracker();
 void recallLineTracker();
 void tunePID();
@@ -27,10 +27,12 @@ void tunePID();
 
 // Define digital and analog pins
 const int Battery_Pin = A0;
-const int RowDetector_Pin = A1; 
-const int Bumper_Pin = 33;
-const int Fluid_Pin = 27;
-const int Status_LED = 25;
+const int LineTracker_5V_Pin = 53;
+const int RowDetector_Pin = A1;
+const int Bumper_Pin = 42;
+const int Fluid_Pin = 11;
+const int Pump_Pin = 12;
+const int Status_LED = 13;
 
 
 // Define program flags
@@ -45,7 +47,7 @@ int Debug_Variable; // Misc variable for debugging sensors
 int Program_State = 0; // Program state. Flags cause the program to switch between states
 int Bumper_State = 1, Bumper_PrevState = 1; // Bumper switches are normally closed
 int Fluid_State = 0, Fluid_PrevState = 0; // Fluid Level switch is normally closed, but kept low by the fluid tank
-int RowDetector_Level[] = { 0,0,0,0,0,0 }; // IR sensor has range between 80-500 (10-80 cm)
+int RowDetector_Level[] = { 0, 0, 0, 0, 0, 0 }; // IR sensor has range between 80-500 (10-80 cm)
 int RowDetector_Index = 0, RowDetector_Total = 0, RowDetector_Avg = 0, RowDetector_PrevAvg = 0;
 int Battery_Level = 1000, Battery_PrevLevel = 1000; // Acceptable battery level is 900-1024 (11-12.5V)
 int Line_Position, Correction_Speed, RightMotor_Speed, LeftMotor_Speed;
@@ -63,13 +65,13 @@ const int Line_Position_Max = 6000;
 
 
 // Define motor driver pins
-#define AIN1 42
-#define BIN1 46
-#define AIN2 40
-#define BIN2 48
+#define AIN1 46
+#define BIN1 50
+#define AIN2 44
+#define BIN2 52
 #define PWMA 3
 #define PWMB 2
-#define STBY 44
+#define STBY 48
 
 // Motor polarity reversal to account for backwards wiring. Value can be 1 or -1
 const int offsetA = 1;
@@ -90,11 +92,11 @@ Motor LeftMotor = Motor(BIN1, BIN2, PWMB, offsetB, STBY);
 // Define line tracker variables
 #define NUM_SENSORS   8     // number of sensors used
 #define TIMEOUT       2500  // waits for 2500 microseconds for sensor outputs to go low
-#define EMITTER_PIN   53     // emitter is controlled by digital pin 53
+#define EMITTER_PIN   51     // emitter is controlled by digital pin 53
 
 // sensors 1 through 8 are connected to odd numbered digital pins 51 to 37, respectively
 QTRSensorsRC qtrrc((unsigned char[]) {
-  51, 49, 47, 45, 43, 41, 39, 37
+  49, 47, 45, 43, 41, 39, 37, 35
 },
 NUM_SENSORS, TIMEOUT, EMITTER_PIN);
 unsigned int sensorValues[NUM_SENSORS];
@@ -116,6 +118,9 @@ unsigned int sensorValues[NUM_SENSORS];
 void setup() {
   Serial.begin(9600);
 
+  pinMode(LineTracker_5V_Pin, OUTPUT); // Use pin 53 for a 5V reference voltage to keep wires neat
+  digitalWrite(LineTracker_5V_Pin, HIGH);
+
   pinMode(Battery_Pin, INPUT);
   pinMode(Bumper_Pin, INPUT);
   pinMode(Fluid_Pin, INPUT);
@@ -123,7 +128,7 @@ void setup() {
 
   //calibrateLineTracker();
   recallLineTracker();
-  
+
   digitalWrite(Status_LED, HIGH);
   delay(500);
   digitalWrite(Status_LED, LOW);
@@ -148,14 +153,14 @@ void loop() {
     RowDetected_Flag = 0;
   }
 
- //checkBattery(); // Check for low battery warning
+  //checkBattery(); // Check for low battery warning
   if (LowBattery_Flag == 1) {
     Program_State = 2;
     LowBattery_Flag = 0;
   }
 
   //checkFluid();
-  if(LowFluid_Flag == 1) {
+  if (LowFluid_Flag == 1) {
     Program_State = 2;
     LowFluid_Flag = 0;
   }
@@ -173,17 +178,17 @@ void loop() {
 
       brake(RightMotor, LeftMotor);
 
-Serial.print("Case 0.   ");
-Serial.print(RowDetector_PrevAvg);
-Serial.print("   ");
-Serial.println(RowDetector_Avg);
+      Serial.print("Case 0.   ");
+      Serial.print(RowDetector_PrevAvg);
+      Serial.print("   ");
+      Serial.println(RowDetector_Avg);
 
-     // tunePID();
+      // tunePID();
 
       break;
 
     case 1: // Line Tracking
-     
+
       delay(Sample_Time);
 
       Line_Position = qtrrc.readLine(sensorValues); // Get current position
@@ -202,8 +207,8 @@ Serial.println(RowDetector_Avg);
       // Calculate Error for PID
       Error_Prev = Error;
       Error = 0.5 - Line_Position_Scaled;
-      Error_Diff = (Error - Error_Prev) / Sample_Time; 
-      Error_Sum += (Error * Sample_Time); 
+      Error_Diff = (Error - Error_Prev) / Sample_Time;
+      Error_Sum += (Error * Sample_Time);
 
       // Calculate Correction_Speed (bounded between 0-100) using PID
       Correction_Speed = (int)( (Kp * Error + Ki * Error_Sum + Kd * Error_Diff) * 100 );
@@ -223,17 +228,17 @@ Serial.println(RowDetector_Avg);
       } else if (LeftMotor_Speed > 255) {
         LeftMotor_Speed = 255;
       }
-      
-Battery_Level = analogRead(Battery_Pin);
-if (Battery_Level > 500) { // Only run motors if battery is connected. 
-      RightMotor.drive(RightMotor_Speed);
-      LeftMotor.drive(LeftMotor_Speed);
-} else { // If battery is not connected, just display the specified speed. 
-      
-            Serial.print(LeftMotor_Speed);
-            Serial.print("      ");
-            Serial.println(RightMotor_Speed);
-}    
+
+      Battery_Level = analogRead(Battery_Pin);
+      if (Battery_Level > 500) { // Only run motors if battery is connected.
+        RightMotor.drive(RightMotor_Speed);
+        LeftMotor.drive(LeftMotor_Speed);
+      } else { // If battery is not connected, just display the specified speed.
+
+        Serial.print(LeftMotor_Speed);
+        Serial.print("      ");
+        Serial.println(RightMotor_Speed);
+      }
       break;
 
 
@@ -281,7 +286,7 @@ void checkBumper() {
   Bumper_State = digitalRead(Bumper_Pin);
 
   if (Bumper_PrevState != Bumper_State) { // If switch state changes
-    if (Bumper_State == 0) { // Bumper switches are normally closed (Collision = 0)    
+    if (Bumper_State == 0) { // Bumper switches are normally closed (Collision = 0)
       Collision_Flag = 1;
     }
   }
@@ -292,7 +297,7 @@ void checkFluid() {
   Fluid_State = digitalRead(Fluid_Pin);
 
   if (Fluid_PrevState != Fluid_State) { // If switch state changes
-    if (Fluid_State == 1) { // Fluid level switch is normally closed, and goes HIGH when tank gets empty.    
+    if (Fluid_State == 1) { // Fluid level switch is normally closed, and goes HIGH when tank gets empty.
       LowFluid_Flag = 1;
     }
   }
@@ -300,21 +305,21 @@ void checkFluid() {
 
 void checkRowDetector() {
 
-RowDetector_Total = RowDetector_Total - RowDetector_Level[RowDetector_Index]; // Subtract old level
-RowDetector_Level[RowDetector_Index] = analogRead(RowDetector_Pin); // Read new level 
-RowDetector_Total = RowDetector_Total + RowDetector_Level[RowDetector_Index]; // Add new level
-RowDetector_Index = ++ RowDetector_Index % 6; // Increment index and wrap around (0-5)
+  RowDetector_Total = RowDetector_Total - RowDetector_Level[RowDetector_Index]; // Subtract old level
+  RowDetector_Level[RowDetector_Index] = analogRead(RowDetector_Pin); // Read new level
+  RowDetector_Total = RowDetector_Total + RowDetector_Level[RowDetector_Index]; // Add new level
+  RowDetector_Index = ++ RowDetector_Index % 6; // Increment index and wrap around (0-5)
 
-RowDetector_PrevAvg = RowDetector_Avg - 10; // Store old moving average value (with offset)
-RowDetector_Avg = RowDetector_Total / 6; // Calculate new moving average value
+  RowDetector_PrevAvg = RowDetector_Avg - 10; // Store old moving average value (with offset)
+  RowDetector_Avg = RowDetector_Total / 6; // Calculate new moving average value
 
 
 
-if (RowDetector_PrevAvg > RowDetector_Avg) { // If distance measured gets much further away
-  RowDetected_Flag = 1;
-}
+  if (RowDetector_PrevAvg > RowDetector_Avg) { // If distance measured gets much further away
+    RowDetected_Flag = 1;
+  }
 
-  
+
 }
 
 void calibrateRowDetector() {
@@ -323,7 +328,7 @@ void calibrateRowDetector() {
   delay(500);
 
 
- // CODE HERE
+  // CODE HERE
 
   Serial.println("Calibration complete.");
   delay(1000);
@@ -342,7 +347,7 @@ void calibrateLineTracker() {
   }
 
   Serial.println("Calibration complete.");
-  
+
   Serial.println();
   Serial.println("Storing Calibration Data into EEPROM...");
 
@@ -350,7 +355,7 @@ void calibrateLineTracker() {
   EEPROM.writeBlock<unsigned int>(addrCalibratedMaximumOn, qtrrc.calibratedMaximumOn, 8);
 
   Serial.println("EEPROM Storage Complete");
-  
+
   delay(1000);
 
 }
