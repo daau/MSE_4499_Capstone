@@ -1,4 +1,4 @@
-/*
+;''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''/*
 
   MSE 4499 Line Tracking Code for Betta Feeder Robot
   Language: Arduino
@@ -18,16 +18,16 @@ void checkBattery();
 int getBatteryPercentage();
 void checkBumper();
 void checkFluid();
-void checkRow(); 
+void checkRowDetector(); 
+void calibrateRowDetector(); 
 void calibrateLineTracker();
-void storeLineTracker();
 void recallLineTracker();
 void tunePID();
 
 
 // Define digital and analog pins
 const int Battery_Pin = A0;
-const int IR_Pin = A1; 
+const int RowDetector_Pin = A1; 
 const int Bumper_Pin = 33;
 const int Fluid_Pin = 27;
 const int Status_LED = 25;
@@ -37,7 +37,7 @@ const int Status_LED = 25;
 int LowBattery_Flag = 0;
 int Collision_Flag = 0;
 int LowFluid_Flag = 0;
-int Row_Flag = 0;
+int RowDetected_Flag = 0;
 
 
 // Define variables
@@ -45,12 +45,12 @@ int Debug_Variable; // Misc variable for debugging sensors
 int Program_State = 0; // Program state. Flags cause the program to switch between states
 int Bumper_State = 1, Bumper_PrevState = 1; // Bumper switches are normally closed
 int Fluid_State = 0, Fluid_PrevState = 0; // Fluid Level switch is normally closed, but kept low by the fluid tank
-int Row_Level[] = { 300, 300, 300 }; // IR sensor has range between 80-500 (10-80 cm)
+int RowDetector_Level[] = { 0,0,0,0,0,0 }; // IR sensor has range between 80-500 (10-80 cm)
+int RowDetector_Index = 0, RowDetector_Total = 0, RowDetector_Avg = 0, RowDetector_PrevAvg = 0;
 int Battery_Level = 1000, Battery_PrevLevel = 1000; // Acceptable battery level is 900-1024 (11-12.5V)
-int Line_Position;
-float Line_Position_Scaled;
-float Error = 0, Error_Prev = 0, Error_Diff = 0, Error_Sum = 0;
-int Correction_Speed, RightMotor_Speed, LeftMotor_Speed;
+int Line_Position, Correction_Speed, RightMotor_Speed, LeftMotor_Speed;
+float Line_Position_Scaled, Error = 0, Error_Prev = 0, Error_Diff = 0, Error_Sum = 0;
+
 
 
 // Define constant variables
@@ -122,10 +122,10 @@ void setup() {
   pinMode(Status_LED, OUTPUT);
 
   //calibrateLineTracker();
-  //storeLineTracker();
   recallLineTracker();
+  
   digitalWrite(Status_LED, HIGH);
-  delay(100);
+  delay(500);
   digitalWrite(Status_LED, LOW);
 
 }
@@ -142,10 +142,22 @@ void loop() {
     Collision_Flag = 0; // Reset flag after servicing
   }
 
- checkBattery(); // Check for low battery warning
+  //checkRowDetector();
+  if (RowDetected_Flag == 1) {
+    Program_State = 2;
+    RowDetected_Flag = 0;
+  }
+
+ //checkBattery(); // Check for low battery warning
   if (LowBattery_Flag == 1) {
     Program_State = 2;
     LowBattery_Flag = 0;
+  }
+
+  //checkFluid();
+  if(LowFluid_Flag == 1) {
+    Program_State = 2;
+    LowFluid_Flag = 0;
   }
 
   if (Program_State == 2) {
@@ -161,12 +173,17 @@ void loop() {
 
       brake(RightMotor, LeftMotor);
 
-      tunePID();
+Serial.print("Case 0.   ");
+Serial.print(RowDetector_PrevAvg);
+Serial.print("   ");
+Serial.println(RowDetector_Avg);
+
+     // tunePID();
 
       break;
 
     case 1: // Line Tracking
-
+     
       delay(Sample_Time);
 
       Line_Position = qtrrc.readLine(sensorValues); // Get current position
@@ -185,8 +202,8 @@ void loop() {
       // Calculate Error for PID
       Error_Prev = Error;
       Error = 0.5 - Line_Position_Scaled;
-      Error_Diff = (Error - Error_Prev) / Sample_Time;  // = (Error-Error_Prev)/(Sample_Time);
-      Error_Sum += (Error * Sample_Time);  // += (Error * Sample_Time);
+      Error_Diff = (Error - Error_Prev) / Sample_Time; 
+      Error_Sum += (Error * Sample_Time); 
 
       // Calculate Correction_Speed (bounded between 0-100) using PID
       Correction_Speed = (int)( (Kp * Error + Ki * Error_Sum + Kd * Error_Diff) * 100 );
@@ -206,16 +223,17 @@ void loop() {
       } else if (LeftMotor_Speed > 255) {
         LeftMotor_Speed = 255;
       }
-
-
+      
+Battery_Level = analogRead(Battery_Pin);
+if (Battery_Level > 500) { // Only run motors if battery is connected. 
       RightMotor.drive(RightMotor_Speed);
       LeftMotor.drive(LeftMotor_Speed);
-
-      /*
+} else { // If battery is not connected, just display the specified speed. 
+      
             Serial.print(LeftMotor_Speed);
             Serial.print("      ");
             Serial.println(RightMotor_Speed);
-      */
+}    
       break;
 
 
@@ -250,9 +268,6 @@ void checkBattery() {
   if (Battery_Level < 900 && Battery_PrevLevel < 900) { // Check 2 values to denoise signal
     LowBattery_Flag = 1;
   }
-  else {
-    LowBattery_Flag = 0;
-  }
 }
 
 int getBatteryPercentage() {  // Returns the battery level as a percentage of full charge (Rough estimate: not linearized)
@@ -283,6 +298,37 @@ void checkFluid() {
   }
 }
 
+void checkRowDetector() {
+
+RowDetector_Total = RowDetector_Total - RowDetector_Level[RowDetector_Index]; // Subtract old level
+RowDetector_Level[RowDetector_Index] = analogRead(RowDetector_Pin); // Read new level 
+RowDetector_Total = RowDetector_Total + RowDetector_Level[RowDetector_Index]; // Add new level
+RowDetector_Index = ++ RowDetector_Index % 6; // Increment index and wrap around (0-5)
+
+RowDetector_PrevAvg = RowDetector_Avg - 10; // Store old moving average value (with offset)
+RowDetector_Avg = RowDetector_Total / 6; // Calculate new moving average value
+
+
+
+if (RowDetector_PrevAvg > RowDetector_Avg) { // If distance measured gets much further away
+  RowDetected_Flag = 1;
+}
+
+  
+}
+
+void calibrateRowDetector() {
+
+  Serial.println("Calibrating Row Detector...");
+  delay(500);
+
+
+ // CODE HERE
+
+  Serial.println("Calibration complete.");
+  delay(1000);
+
+}
 
 void calibrateLineTracker() {
 
@@ -296,11 +342,7 @@ void calibrateLineTracker() {
   }
 
   Serial.println("Calibration complete.");
-  delay(1000);
-
-}
-
-void storeLineTracker() {
+  
   Serial.println();
   Serial.println("Storing Calibration Data into EEPROM...");
 
@@ -308,6 +350,9 @@ void storeLineTracker() {
   EEPROM.writeBlock<unsigned int>(addrCalibratedMaximumOn, qtrrc.calibratedMaximumOn, 8);
 
   Serial.println("EEPROM Storage Complete");
+  
+  delay(1000);
+
 }
 
 void recallLineTracker() {
