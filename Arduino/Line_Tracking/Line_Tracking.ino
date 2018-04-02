@@ -1,5 +1,4 @@
-; ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''/*
-
+/*
   MSE 4499 Line Tracking Code for Betta Feeder Robot
   Language: Arduino
   Authors: Michael Hoskins
@@ -33,9 +32,10 @@ const int Bumper_Pin = 42;
 const int Fluid_Pin = 11;
 const int Pump_Pin = 12;
 const int Status_LED = 13;
+// Note: Motor driver and IR array have their pin definitions further below
 
 
-// Define program flags
+// Define program activity flags
 int LowBattery_Flag = 0;
 int Collision_Flag = 0;
 int LowFluid_Flag = 0;
@@ -43,25 +43,23 @@ int RowDetected_Flag = 0;
 
 
 // Define variables
-int Debug_Variable; // Misc variable for debugging sensors
 int Program_State = 0; // Program state. Flags cause the program to switch between states
 int Bumper_State = 1, Bumper_PrevState = 1; // Bumper switches are normally closed
-int Fluid_State = 0, Fluid_PrevState = 0; // Fluid Level switch is normally closed, but kept low by the fluid tank
+int Fluid_State = 1, Fluid_PrevState = 1; // Fluid Level switch is normally closed, but kept low by the fluid tank
 int RowDetector_Level[] = { 0, 0, 0, 0, 0, 0 }; // IR sensor has range between 80-500 (10-80 cm)
-int RowDetector_Index = 0, RowDetector_Total = 0, RowDetector_Avg = 0, RowDetector_PrevAvg = 0;
+int RowDetector_Index = 0, RowDetector_Total = 0, RowDetector_Avg = 0, RowDetector_PrevAvg[] = {0, 0, 0};
 int Battery_Level = 1000, Battery_PrevLevel = 1000; // Acceptable battery level is 900-1024 (11-12.5V)
 int Line_Position, Correction_Speed, RightMotor_Speed, LeftMotor_Speed;
+float Kp = 5, Ki = 0, Kd = 0;
 float Line_Position_Scaled, Error = 0, Error_Prev = 0, Error_Diff = 0, Error_Sum = 0;
 
 
 
 // Define constant variables
-float Kp = 5;
-float Ki = 0;
-float Kd = 0;
-int Base_Speed = 200;
-const int Sample_Time = 50;
+int Base_Speed = 200; // Base speed of drive motors prior to PID corrections
+const int Sample_Time = 50; // Sample time for PID loop
 const int Line_Position_Max = 6000;
+const int Index_Size = 6; // The number of samples used in the Row Detector moving average. Must match the RowDetector_Level[] array size
 
 
 // Define motor driver pins
@@ -75,7 +73,7 @@ const int Line_Position_Max = 6000;
 
 // Motor polarity reversal to account for backwards wiring. Value can be 1 or -1
 const int offsetA = 1;
-const int offsetB = -1;
+const int offsetB = 1;
 
 // Initializing motors
 Motor RightMotor = Motor(AIN1, AIN2, PWMA, offsetA, STBY);
@@ -92,7 +90,7 @@ Motor LeftMotor = Motor(BIN1, BIN2, PWMB, offsetB, STBY);
 // Define line tracker variables
 #define NUM_SENSORS   8     // number of sensors used
 #define TIMEOUT       2500  // waits for 2500 microseconds for sensor outputs to go low
-#define EMITTER_PIN   51     // emitter is controlled by digital pin 53
+#define EMITTER_PIN   51     // emitter is controlled by digital pin 51
 
 // sensors 1 through 8 are connected to odd numbered digital pins 51 to 37, respectively
 QTRSensorsRC qtrrc((unsigned char[]) {
@@ -118,13 +116,14 @@ unsigned int sensorValues[NUM_SENSORS];
 void setup() {
   Serial.begin(9600);
 
-  pinMode(LineTracker_5V_Pin, OUTPUT); // Use pin 53 for a 5V reference voltage to keep wires neat
+  pinMode(LineTracker_5V_Pin, OUTPUT); // Use pin 53 for a 5V reference voltage to keep wires tidy.
   digitalWrite(LineTracker_5V_Pin, HIGH);
 
   pinMode(Battery_Pin, INPUT);
   pinMode(Bumper_Pin, INPUT);
   pinMode(Fluid_Pin, INPUT);
   pinMode(Status_LED, OUTPUT);
+  pinMode(Pump_Pin, OUTPUT);
 
   //calibrateLineTracker();
   recallLineTracker();
@@ -177,88 +176,103 @@ void loop() {
     case 0: // Stationary Robot.
 
       brake(RightMotor, LeftMotor);
-
-      Serial.print("Case 0.   ");
-      Serial.print(RowDetector_PrevAvg);
-      Serial.print("   ");
-      Serial.println(RowDetector_Avg);
+      analogWrite(Pump_Pin, 0);
+      /*
+           Serial.println(RowDetector_PrevAvg);
+           Serial.print("        ");
+      */
+      //  Serial.println(RowDetector_Avg);
 
       // tunePID();
 
       break;
 
-    case 1: // Line Tracking
-
-      delay(Sample_Time);
-
-      Line_Position = qtrrc.readLine(sensorValues); // Get current position
-
-      // Constrain max/min values
-      if (Line_Position > Line_Position_Max) {
-        Line_Position = Line_Position_Max;
-      }
-      else if (Line_Position < 0) {
-        Line_Position = 0;
-      }
-
-      // Scale Line_Position from 0-Line_Position_Max to 0-1 and convert int to float
-      Line_Position_Scaled = ((float) Line_Position / (float) Line_Position_Max);
-
-      // Calculate Error for PID
-      Error_Prev = Error;
-      Error = 0.5 - Line_Position_Scaled;
-      Error_Diff = (Error - Error_Prev) / Sample_Time;
-      Error_Sum += (Error * Sample_Time);
-
-      // Calculate Correction_Speed (bounded between 0-100) using PID
-      Correction_Speed = (int)( (Kp * Error + Ki * Error_Sum + Kd * Error_Diff) * 100 );
-
-
-      // Set drive motor speeds, constrained to forward motion
-      RightMotor_Speed = Base_Speed - Correction_Speed;
-      if (RightMotor_Speed < 0) {
-        RightMotor_Speed = 0;
-      } else if (RightMotor_Speed > 255) {
-        RightMotor_Speed = 255;
-      }
-
-      LeftMotor_Speed = Base_Speed + Correction_Speed;
-      if (LeftMotor_Speed < 0) {
-        LeftMotor_Speed = 0;
-      } else if (LeftMotor_Speed > 255) {
-        LeftMotor_Speed = 255;
-      }
-
+    case 1:
       Battery_Level = analogRead(Battery_Pin);
-      if (Battery_Level > 500) { // Only run motors if battery is connected.
-        RightMotor.drive(RightMotor_Speed);
-        LeftMotor.drive(LeftMotor_Speed);
-      } else { // If battery is not connected, just display the specified speed.
-
-        Serial.print(LeftMotor_Speed);
-        Serial.print("      ");
-        Serial.println(RightMotor_Speed);
+      if (Battery_Level > 700) { // Only run motors if battery is connected.
+        analogWrite(Pump_Pin, 150);
       }
+
+      delay(50);
       break;
 
-
-    case 2: // Low Battery State. Pause all actions and warn user of low battery
-      brake(RightMotor, LeftMotor);
-
-      Serial.print("Battery Level: ");
-      Serial.print(Battery_Level);
-      Serial.print("      Battery %: ");
-      Serial.print(getBatteryPercentage());
-      if ( Battery_Level < 762 ) {
-        Serial.println("%   Battery critically low!");
-      }
-      else {
-        Serial.println("%");
-      }
-
+    case 2: analogWrite(Pump_Pin, 0);
+      delay(50);
       break;
+      /*
+          case 1: // Line Tracking
+
+            delay(Sample_Time);
+
+            Line_Position = qtrrc.readLine(sensorValues); // Get current position
+
+            // Constrain max/min values
+            if (Line_Position > Line_Position_Max) {
+              Line_Position = Line_Position_Max;
+            }
+            else if (Line_Position < 0) {
+              Line_Position = 0;
+            }
+
+            // Scale Line_Position from 0-Line_Position_Max to 0-1 and convert int to float
+            Line_Position_Scaled = ((float) Line_Position / (float) Line_Position_Max);
+
+            // Calculate Error for PID
+            Error_Prev = Error;
+            Error = 0.5 - Line_Position_Scaled;
+            Error_Diff = (Error - Error_Prev) / Sample_Time;
+            Error_Sum += (Error * Sample_Time);
+
+            // Calculate Correction_Speed (bounded between 0-100) using PID
+            Correction_Speed = (int)( (Kp * Error + Ki * Error_Sum + Kd * Error_Diff) * 100 );
 
 
+            // Set drive motor speeds, constrained to forward motion
+            RightMotor_Speed = Base_Speed - Correction_Speed;
+            if (RightMotor_Speed < 0) {
+              RightMotor_Speed = 0;
+            } else if (RightMotor_Speed > 255) {
+              RightMotor_Speed = 255;
+            }
+
+            LeftMotor_Speed = Base_Speed + Correction_Speed;
+            if (LeftMotor_Speed < 0) {
+              LeftMotor_Speed = 0;
+            } else if (LeftMotor_Speed > 255) {
+              LeftMotor_Speed = 255;
+            }
+
+            Battery_Level = analogRead(Battery_Pin);
+            if (Battery_Level > 700) { // Only run motors if battery is connected.
+              RightMotor.drive(RightMotor_Speed);
+              LeftMotor.drive(LeftMotor_Speed);
+            } else { // If battery is not connected, just print the specified motor speeds.
+
+              Serial.print(Line_Position);
+              Serial.print("     ");
+              Serial.print(LeftMotor_Speed);
+              Serial.print("      ");
+              Serial.println(RightMotor_Speed);
+            }
+            break;
+
+
+          case 2: // Low Battery State. Pause all actions and warn user of low battery
+            brake(RightMotor, LeftMotor);
+
+            Serial.print("Battery Level: ");
+            Serial.print(Battery_Level);
+            Serial.print("      Battery %: ");
+            Serial.print(getBatteryPercentage());
+            if ( Battery_Level < 900 ) {
+              Serial.println("%   Battery critically low!");
+            }
+            else {
+              Serial.println("%");
+            }
+
+            break;
+      */
   }
 
 
@@ -298,7 +312,7 @@ void checkFluid() {
 
   if (Fluid_PrevState != Fluid_State) { // If switch state changes
     if (Fluid_State == 1) { // Fluid level switch is normally closed, and goes HIGH when tank gets empty.
-      LowFluid_Flag = 1;
+      LowFluid_Flag = 1; // Flag is set if a full tank is placed and then removed. If no weight is placed on initially, flag will not be set.
     }
   }
 }
@@ -308,18 +322,32 @@ void checkRowDetector() {
   RowDetector_Total = RowDetector_Total - RowDetector_Level[RowDetector_Index]; // Subtract old level
   RowDetector_Level[RowDetector_Index] = analogRead(RowDetector_Pin); // Read new level
   RowDetector_Total = RowDetector_Total + RowDetector_Level[RowDetector_Index]; // Add new level
-  RowDetector_Index = ++ RowDetector_Index % 6; // Increment index and wrap around (0-5)
+  RowDetector_Index = ++ RowDetector_Index % Index_Size; // Increment index and wrap around (0-5)
 
-  RowDetector_PrevAvg = RowDetector_Avg - 10; // Store old moving average value (with offset)
-  RowDetector_Avg = RowDetector_Total / 6; // Calculate new moving average value
+  RowDetector_PrevAvg[2] = RowDetector_PrevAvg[1];
+  RowDetector_PrevAvg[1] = RowDetector_PrevAvg[0];
+  RowDetector_PrevAvg[0] = RowDetector_Avg; // Store old moving average value (with offset)
+  RowDetector_Avg = RowDetector_Total / Index_Size; // Calculate new moving average value
 
+  /*
+    // Floor = 160+/- 10
+    // Water = 180+/- 10?
+    // Cup = 200+/- 10
 
+    if (RowDetector_PrevAvg[2] >= 170 && RowDetector_PrevAvg[1] >= 170 && RowDetector_PrevAvg[0] < 170 &&RowDetector_Avg < 170) { // Floor
+     // RowDetected_Flag = 1;
+     Serial.println("Floor");
+    }
+    else if (RowDetector_PrevAvg[2] <= 200 && RowDetector_PrevAvg[1] <= 200 && RowDetector_PrevAvg[0] > 200 && RowDetector_Avg > 200 ) { // Edge
+      Serial.println("Edge");
+    }
+    else if ((RowDetector_PrevAvg[2] > 200 && RowDetector_PrevAvg[1] > 200) || (RowDetector_PrevAvg[2] < 170 && RowDetector_PrevAvg[1] < 170) && RowDetector_PrevAvg[0] <= 200 && RowDetector_PrevAvg[0] >= 170 && RowDetector_Avg <= 200 && RowDetector_Avg >= 170 ) { // Water
+       Serial.println("Water");
+    }
+  */
 
-  if (RowDetector_PrevAvg > RowDetector_Avg) { // If distance measured gets much further away
-    RowDetected_Flag = 1;
-  }
-
-
+  // Replace with 1,2,or 3
+  // average 5 readings and round to nearest integer (1,2,or 3)
 }
 
 void calibrateRowDetector() {
