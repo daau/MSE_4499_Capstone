@@ -10,6 +10,10 @@
 #include <EEPROMex.h> // Extended EEPROM library:  http://thijs.elenbaas.net/2012/07/extended-eeprom-library-for-arduino/
 #include <SparkFun_TB6612.h>  // Motor Driver library
 #include <QTRSensors.h> // IR Line Tracker library
+#include <Wire.h> // For I2C
+#include <LCD.h> // For LCD
+#include <Keypad.h> // Keypad
+#include <LiquidCrystal_I2C.h> // Added library for LCD
 
 
 // Function Declarations
@@ -46,20 +50,40 @@ int RowDetected_Flag = 0;
 int Program_State = 0; // Program state. Flags cause the program to switch between states
 int Bumper_State = 1, Bumper_PrevState = 1; // Bumper switches are normally closed
 int Fluid_State = 1, Fluid_PrevState = 1; // Fluid Level switch is normally closed, but kept low by the fluid tank
-int RowDetector_Level[] = { 0, 0, 0, 0, 0, 0 }; // IR sensor has range between 80-500 (10-80 cm)
-int RowDetector_Index = 0, RowDetector_Total = 0, RowDetector_Avg = 0, RowDetector_PrevAvg[] = {0, 0, 0};
+int RowDetector_Level[] = { 0, 0, 0 }; // IR sensor has range between 80-500 (10-80 cm)
+int RowDetector_Index = 0, RowDetector_Total = 0, RowDetector_Avg = 0, RowDetector_PrevAvg = 0;
 int Battery_Level = 1000, Battery_PrevLevel = 1000; // Acceptable battery level is 900-1024 (11-12.5V)
 int Line_Position, Correction_Speed, RightMotor_Speed, LeftMotor_Speed;
 float Kp = 5, Ki = 0, Kd = 0;
 float Line_Position_Scaled, Error = 0, Error_Prev = 0, Error_Diff = 0, Error_Sum = 0;
 
+//LCD Variables
+int stage = 0;
+char keyInput;
+int menuIndex = 0;
+bool updateLCD = true;
+
+int amount = 0;
+int rows = 0;
+int containers = 0;
+
+int hundreds = 0;
+int tens = 0;
+int ones = 0;
+
+int keyInputState = 0;
+
 
 
 // Define constant variables
-int Base_Speed = 200; // Base speed of drive motors prior to PID corrections
+int Base_Speed = 150; // Base speed of drive motors prior to PID corrections
 const int Sample_Time = 50; // Sample time for PID loop
 const int Line_Position_Max = 6000;
-const int Index_Size = 6; // The number of samples used in the Row Detector moving average. Must match the RowDetector_Level[] array size
+const int Index_Size = 3; // The number of samples used in the Row Detector moving average. Must match the RowDetector_Level[] array size
+
+const int Buzzer_Pin = 33; // Buzzer pin
+const int lcd_address = 0x3F; // LCD Address
+const byte MAX_ELEM = 4;
 
 
 // Define motor driver pins
@@ -113,6 +137,137 @@ unsigned int sensorValues[NUM_SENSORS];
 #define addrCalibratedMinimumOn 0
 #define addrCalibratedMaximumOn 100
 
+
+// =====================================================================
+// ============================= Keypad =============================
+// =====================================================================
+// Keypad setup
+const byte ROWS = 4; // Keypad # rows
+const byte COLS = 4; // Keypad # cols
+char hexaKeys[ROWS][COLS] = { // GUI map of keypad
+  {'1', '2', '3', 'A'},
+  {'4', '5', '6', 'B'},
+  {'7', '8', '9', 'C'},
+  {'*', '0', '#', 'D'}
+};
+byte rowPins[ROWS] = {40, 38, 36, 34};  // Keypad pins
+byte colPins[COLS] = {32, 30, 28, 26};  // Keypad pins
+Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+
+// =====================================================================
+// ============================= LCD =============================
+// =====================================================================
+
+LiquidCrystal_I2C lcd(lcd_address, 2, 1, 0, 4, 5, 6, 7);
+
+char *menu_0[] = {
+  "1. Prime/clean", 
+  "2. Start run", 
+  "3. Test run",
+  "4. Settings",
+};
+
+char *menu_1[] = {
+  "A to prime 1 sec",
+  "B to prime 3 sec",
+  "",
+  "* to go back"
+};
+
+
+char *menu_2[] = {
+  "1. Amount", 
+  "2. # rows", 
+  "3. Containers/row",
+  "4. Start",
+};
+
+char *menu_3[] = {
+  "1. Amount", 
+  "2. # rows", 
+  "3. Containers/row",
+  "4. Start",
+};
+
+char *menu_4[] = {
+  "1. Tuning",
+  "2. Speed",
+  "3. Dispense delay",
+  "4. PID settings" 
+};
+
+char *menu_5[] = {
+  "Dispensing",
+  "In Progress....",
+  "",
+  ""
+};
+
+char *menu_6[] = {
+  "1. Tune row sensor",
+  "2. Tune line sensor",
+  "",
+  "* to go back"
+};
+
+char *menu_7[] = {
+  "1. Fast",
+  "2. Medium",
+  "3. Slow",
+  "* to go back"
+};
+
+char *menu_8[] = {
+  "1. High",
+  "2. Medium",
+  "3. Low",
+  "* to go back"
+};
+
+char *menu_9[] = {
+  "P (1+,4-)",
+  "I (2+,5-)",
+  "D (3+,6-)",
+  "* to go back"
+};
+
+char *menu_10[] = {
+  "Amount:",
+  "",
+  "",
+  "* = back B = reset", 
+};
+
+char *menu_11[] = {
+  "Rows:",
+  "",
+  "",
+  "* = back B = reset",  
+};
+
+char *menu_12[] = {
+  "Containers:",
+  "",
+  "",
+  "* = back B = reset",
+};
+
+char **menu_array[] = {
+  menu_0, 
+  menu_1, 
+  menu_2, 
+  menu_3, 
+  menu_4, 
+  menu_5, 
+  menu_6, 
+  menu_7,
+  menu_8,
+  menu_9,
+  menu_10,
+  menu_11,
+  menu_12
+};
+
 void setup() {
   Serial.begin(9600);
 
@@ -124,6 +279,12 @@ void setup() {
   pinMode(Fluid_Pin, INPUT);
   pinMode(Status_LED, OUTPUT);
   pinMode(Pump_Pin, OUTPUT);
+  pinMode(Buzzer_Pin, OUTPUT); // Set buzzer
+
+  // LCD
+  lcd.begin (20, 4); // 16 x 2 LCD module
+  lcd.setBacklightPin(3, POSITIVE); // BL, BL_POL
+  lcd.setBacklight(HIGH);
 
   //calibrateLineTracker();
   recallLineTracker();
@@ -142,13 +303,13 @@ void loop() {
   if (Collision_Flag == 1) {
     Serial.println("Collision Detected");
     //Program_State = 0; // If collision occurs, pause all action
-    Program_State = ++Program_State % 3;  // Increment, roll over at n-1 (for testing)
+    Program_State = ++Program_State % 2;  // Increment, roll over at n-1 (for testing)
     Collision_Flag = 0; // Reset flag after servicing
   }
 
-  //checkRowDetector();
-  if (RowDetected_Flag == 1) {
-    Program_State = 2;
+  checkRowDetector();
+  if (RowDetected_Flag == 1 && Program_State == 1) {
+    Program_State = 3;
     RowDetected_Flag = 0;
   }
 
@@ -158,19 +319,127 @@ void loop() {
     LowBattery_Flag = 0;
   }
 
-  //checkFluid();
+  checkFluid();
   if (LowFluid_Flag == 1) {
-    Program_State = 2;
+    Program_State = 0;
     LowFluid_Flag = 0;
   }
 
-  if (Program_State == 2) {
-    digitalWrite(Status_LED, HIGH);
-  } else {
-    digitalWrite(Status_LED, LOW);
+// LCD Loop Code:
+
+if (updateLCD){
+    updateDisplay(menu_array[menuIndex]);
   }
 
+  keyInput = customKeypad.getKey();
+  
+  if (keyInput) {
+    buzz();
+    switch (stage) {
+      case 0: // Main menu
+        if(keyInput == '1'){
+          setStage(1);
+        } else if (keyInput == '2'){
+          setStage(2);
+        } else if (keyInput == '3'){
+          setStage(3);
+        } else if (keyInput == '4'){
+          setStage(4);
+        }
+        break;
+      case 1: // Prime / Clean pump
+        if(keyInput == '*'){
+          setStage(0);
+        } else if (keyInput == 'A'){
+          // Dispense for 3 seconds
+        }
+        break;
+      case 2: // Start run
+        if(keyInput == '*'){
+          setStage(0);
+        } else if (keyInput == '1'){
+          setStage(10);       
+        } else if (keyInput == '2'){
+          setStage(11);       
+        } else if (keyInput == '3'){
+          setStage(12);       
+        } else if (keyInput == '4'){
+          setStage(5);       
+        }
+        break;
+      case 3: // Test run
+        if(keyInput == '*'){
+          setStage(0);
+        }
+        break;
+      case 4: // General settings
+        if(keyInput == '*'){
+          setStage(0);
+        } else if (keyInput == '1'){
+          setStage(6);
+        } else if (keyInput == '2'){
+          setStage(7);
+        } else if (keyInput == '3'){
+          setStage(8);
+        } else if (keyInput == '4'){
+          setStage(9);
+        }
+        break;
+      case 5: // Running -- Display stats
+        if(keyInput == '*'){
+          setStage(2);
+          Program_State = 0;
+        }
+        Program_State = 0;
+        // TO BE COMPLETED
+        break;
+      case 6: // Tuning -- TO BE COMPLETED
+        if(keyInput == '*'){
+          setStage(4);
+        }
+        break;
+      case 7: // Speed adjustment -- TO BE COMPLETED
+        if(keyInput == '*'){
+          setStage(4);
+        }
+        break;
+      case 8: // Dispense delay -- TO BE COMPLETED
+        if(keyInput == '*'){
+          setStage(4);
+        }
+        break;
+      case 9: // PID tuning -- TO BE COMPLETED
+        if(keyInput == '*'){
+          setStage(4);
+        }
+        break;
+      case 10: // Amount of liquid to be dispensed -- TO BE COMPLETED
+        if(keyInput == '*'){
+          setStage(2);
+          resetInput();
+        } else {
+          getInput(keyInput);
+        }
+        break;                        
+      case 11: // Number of rows -- TO BE COMPLETED
+        if(keyInput == '*'){
+          setStage(2);
+          resetInput();
+        } else {
+          getInputRows(keyInput);
+        }
+        break;
+      case 12: // Number of containers -- TO BE COMPLETED
+        if(keyInput == '*'){
+          setStage(2);
+        }
+        break;                
+      default:
+        break;
+    }  
+  }  
 
+  
   switch (Program_State) {
 
     case 0: // Stationary Robot.
@@ -182,97 +451,120 @@ void loop() {
            Serial.print("        ");
       */
       //  Serial.println(RowDetector_Avg);
-
       // tunePID();
 
       break;
 
-    case 1:
-      Battery_Level = analogRead(Battery_Pin);
-      if (Battery_Level > 700) { // Only run motors if battery is connected.
-        analogWrite(Pump_Pin, 150);
+
+    case 1: // Line Tracking
+
+      delay(Sample_Time);
+
+      Line_Position = qtrrc.readLine(sensorValues); // Get current position
+
+      // Constrain max/min values
+      if (Line_Position > Line_Position_Max) {
+        Line_Position = Line_Position_Max;
+      }
+      else if (Line_Position < 0) {
+        Line_Position = 0;
       }
 
-      delay(50);
+      // Scale Line_Position from 0-Line_Position_Max to 0-1 and convert int to float
+      Line_Position_Scaled = ((float) Line_Position / (float) Line_Position_Max);
+
+      // Calculate Error for PID
+      Error_Prev = Error;
+      Error = 0.5 - Line_Position_Scaled;
+      Error_Diff = (Error - Error_Prev) / Sample_Time;
+      Error_Sum += (Error * Sample_Time);
+
+      // Calculate Correction_Speed (bounded between 0-100) using PID
+      Correction_Speed = (int)( (Kp * Error + Ki * Error_Sum + Kd * Error_Diff) * 100 );
+
+
+      // Set drive motor speeds, constrained to forward motion
+      RightMotor_Speed = Base_Speed - Correction_Speed;
+      if (RightMotor_Speed < 0) {
+        RightMotor_Speed = 0;
+      } else if (RightMotor_Speed > 255) {
+        RightMotor_Speed = 255;
+      }
+
+      LeftMotor_Speed = Base_Speed + Correction_Speed;
+      if (LeftMotor_Speed < 0) {
+        LeftMotor_Speed = 0;
+      } else if (LeftMotor_Speed > 255) {
+        LeftMotor_Speed = 255;
+      }
+
+      Battery_Level = analogRead(Battery_Pin);
+      if (Battery_Level > 700) { // Only run motors if battery is connected.
+        RightMotor.drive(RightMotor_Speed);
+        LeftMotor.drive(LeftMotor_Speed);
+      } else { // If battery is not connected, just print the specified motor speeds.
+
+        Serial.print(Line_Position);
+        Serial.print("     ");
+        Serial.print(LeftMotor_Speed);
+        Serial.print("      ");
+        Serial.println(RightMotor_Speed);
+      }
       break;
 
-    case 2: analogWrite(Pump_Pin, 0);
-      delay(50);
+
+    case 2: // Low Battery State. Pause all actions and warn user of low battery
+      brake(RightMotor, LeftMotor);
+
+      Serial.print("Battery Level: ");
+      Serial.print(Battery_Level);
+      Serial.print("      Battery %: ");
+      Serial.print(getBatteryPercentage());
+      if ( Battery_Level < 900 ) {
+        Serial.println("%   Battery critically low!");
+      }
+      else {
+        Serial.println("%");
+      }
+
       break;
-      /*
-          case 1: // Line Tracking
 
-            delay(Sample_Time);
+      case 3: // Row detected
 
-            Line_Position = qtrrc.readLine(sensorValues); // Get current position
+      
 
-            // Constrain max/min values
-            if (Line_Position > Line_Position_Max) {
-              Line_Position = Line_Position_Max;
-            }
-            else if (Line_Position < 0) {
-              Line_Position = 0;
-            }
+      // Wait for 2 seconds to "dispense"
+      brake(RightMotor, LeftMotor);
 
-            // Scale Line_Position from 0-Line_Position_Max to 0-1 and convert int to float
-            Line_Position_Scaled = ((float) Line_Position / (float) Line_Position_Max);
-
-            // Calculate Error for PID
-            Error_Prev = Error;
-            Error = 0.5 - Line_Position_Scaled;
-            Error_Diff = (Error - Error_Prev) / Sample_Time;
-            Error_Sum += (Error * Sample_Time);
-
-            // Calculate Correction_Speed (bounded between 0-100) using PID
-            Correction_Speed = (int)( (Kp * Error + Ki * Error_Sum + Kd * Error_Diff) * 100 );
-
-
-            // Set drive motor speeds, constrained to forward motion
-            RightMotor_Speed = Base_Speed - Correction_Speed;
-            if (RightMotor_Speed < 0) {
-              RightMotor_Speed = 0;
-            } else if (RightMotor_Speed > 255) {
-              RightMotor_Speed = 255;
-            }
-
-            LeftMotor_Speed = Base_Speed + Correction_Speed;
-            if (LeftMotor_Speed < 0) {
-              LeftMotor_Speed = 0;
-            } else if (LeftMotor_Speed > 255) {
-              LeftMotor_Speed = 255;
-            }
-
-            Battery_Level = analogRead(Battery_Pin);
-            if (Battery_Level > 700) { // Only run motors if battery is connected.
-              RightMotor.drive(RightMotor_Speed);
-              LeftMotor.drive(LeftMotor_Speed);
-            } else { // If battery is not connected, just print the specified motor speeds.
-
-              Serial.print(Line_Position);
-              Serial.print("     ");
-              Serial.print(LeftMotor_Speed);
-              Serial.print("      ");
-              Serial.println(RightMotor_Speed);
-            }
-            break;
-
-
-          case 2: // Low Battery State. Pause all actions and warn user of low battery
-            brake(RightMotor, LeftMotor);
-
-            Serial.print("Battery Level: ");
-            Serial.print(Battery_Level);
-            Serial.print("      Battery %: ");
-            Serial.print(getBatteryPercentage());
-            if ( Battery_Level < 900 ) {
-              Serial.println("%   Battery critically low!");
-            }
-            else {
-              Serial.println("%");
-            }
-
-            break;
+      /* 
+        Battery_Level = analogRead(Battery_Pin);
+        if (Battery_Level > 700) { // Only run motors if battery is connected.
+        analogWrite(Pump_Pin, 150);
+        }
       */
+      
+      delay(2000);
+
+      //analogWrite(Pump_Pin, 0);
+      
+      // Drive forward for 1 s
+      Battery_Level = analogRead(Battery_Pin);
+      if (Battery_Level > 700) { // Only run motors if battery is connected.
+        RightMotor.drive(150);
+        LeftMotor.drive(145);
+      } else { // If battery is not connected, just print the specified motor speeds.
+
+        Serial.print(Line_Position);
+        Serial.print("     ");
+        Serial.print(LeftMotor_Speed);
+        Serial.print("      ");
+        Serial.println(RightMotor_Speed);
+      }
+      delay(750);
+      Program_State = 1;
+      break;
+
+     
   }
 
 
@@ -318,43 +610,27 @@ void checkFluid() {
 }
 
 void checkRowDetector() {
-
+/*
   RowDetector_Total = RowDetector_Total - RowDetector_Level[RowDetector_Index]; // Subtract old level
   RowDetector_Level[RowDetector_Index] = analogRead(RowDetector_Pin); // Read new level
   RowDetector_Total = RowDetector_Total + RowDetector_Level[RowDetector_Index]; // Add new level
   RowDetector_Index = ++ RowDetector_Index % Index_Size; // Increment index and wrap around (0-5)
 
-  RowDetector_PrevAvg[2] = RowDetector_PrevAvg[1];
-  RowDetector_PrevAvg[1] = RowDetector_PrevAvg[0];
-  RowDetector_PrevAvg[0] = RowDetector_Avg; // Store old moving average value (with offset)
+  
+  RowDetector_PrevAvg = RowDetector_Avg; // Store old moving average value (with offset)
   RowDetector_Avg = RowDetector_Total / Index_Size; // Calculate new moving average value
-
-  /*
-    // Floor = 160+/- 10
-    // Water = 180+/- 10?
-    // Cup = 200+/- 10
-
-    if (RowDetector_PrevAvg[2] >= 170 && RowDetector_PrevAvg[1] >= 170 && RowDetector_PrevAvg[0] < 170 &&RowDetector_Avg < 170) { // Floor
-     // RowDetected_Flag = 1;
-     Serial.println("Floor");
-    }
-    else if (RowDetector_PrevAvg[2] <= 200 && RowDetector_PrevAvg[1] <= 200 && RowDetector_PrevAvg[0] > 200 && RowDetector_Avg > 200 ) { // Edge
-      Serial.println("Edge");
-    }
-    else if ((RowDetector_PrevAvg[2] > 200 && RowDetector_PrevAvg[1] > 200) || (RowDetector_PrevAvg[2] < 170 && RowDetector_PrevAvg[1] < 170) && RowDetector_PrevAvg[0] <= 200 && RowDetector_PrevAvg[0] >= 170 && RowDetector_Avg <= 200 && RowDetector_Avg >= 170 ) { // Water
-       Serial.println("Water");
-    }
-  */
-
-  // Replace with 1,2,or 3
-  // average 5 readings and round to nearest integer (1,2,or 3)
+*/
+RowDetector_Avg = analogRead(RowDetector_Pin);
+\
+if (RowDetector_Avg > 350 && RowDetector_Avg < 650) { // 650 is upper bound filter, 350 = 15 cm +/- 2cm
+  RowDetected_Flag = 1;
+}
 }
 
 void calibrateRowDetector() {
 
   Serial.println("Calibrating Row Detector...");
   delay(500);
-
 
   // CODE HERE
 
@@ -441,6 +717,202 @@ void tunePID() {
 
   }
 
+}
+
+
+// =====================================================================
+// ============================= Functions =============================
+// =====================================================================
+
+void updateDisplay(char **menu) {
+   lcd.clear ();
+  for(int i = 0; i < MAX_ELEM; i++){
+    lcd.print(menu[i]);
+    lcd.setCursor(0, i+1);
+  }
+  updateLCD = false;
+}
+
+void printLCD(int column, int row, String test){
+  lcd.clear ();
+  lcd.print(test);
+}
+
+void setStage(int var){
+  updateLCD = true;
+  menuIndex = var;
+  stage = var;
+}
+
+void buzz(){
+  tone(Buzzer_Pin, 1000); // Send 1KHz sound signal
+  delay(150);        // 150ms
+  noTone(Buzzer_Pin);     // Stop sound  
+}
+
+
+// =====================================================================
+// ============================= KEYPAD NUM VARS =============================
+// =====================================================================
+
+void getInput(char keyInput){
+    switch (keyInputState){
+      case 0:
+        lcd.setCursor(0, 1);
+        lcd.print(keyInput);
+        hundreds = keyInput - '0';  
+        keyInputState = 1;
+        break;
+      case 1:
+        if (keyInput == '#'){
+          calculateNumberAmount();
+          keyInputState = 4;
+          break;
+        } else if (keyInput == 'B'){
+          resetInput();
+          break;
+        }
+        lcd.print(keyInput);  
+        keyInputState = 2;     
+        tens = keyInput - '0'; 
+        break;
+      case 2:      
+        if (keyInput == '#'){
+          calculateNumberAmount();
+          keyInputState = 4;
+          break;
+        } else if (keyInput == 'B'){
+          resetInput();
+          break;
+        }
+        lcd.print(keyInput);  
+        keyInputState = 3;
+        ones = keyInput - '0';
+        break;
+      case 3:
+        if (keyInput == '#'){
+          keyInputState = 4;
+          calculateNumberAmount();
+          break;
+        } else if (keyInput == 'B'){
+          resetInput();
+          break;
+        }
+        break;
+      case 4:
+        if (keyInput == 'B'){
+          resetInput();
+          break;
+        }      
+        break;
+    }  
+}
+
+void getInputRows(char keyInput){
+    switch (keyInputState){
+      case 0:
+        lcd.setCursor(0, 1);
+        lcd.print(keyInput);
+        hundreds = keyInput - '0';  
+        keyInputState = 1;
+        break;
+      case 1:
+        if (keyInput == '#'){
+          calculateNumberRows();
+          keyInputState = 4;
+          break;
+        } else if (keyInput == 'B'){
+          resetInput();
+          break;
+        }
+        lcd.print(keyInput);  
+        keyInputState = 2;     
+        tens = keyInput - '0'; 
+        break;
+      case 2:      
+        if (keyInput == '#'){
+          calculateNumberRows();
+          keyInputState = 4;
+          break;
+        } else if (keyInput == 'B'){
+          resetInput();
+          break;
+        }
+        lcd.print(keyInput);  
+        keyInputState = 3;
+        ones = keyInput - '0';
+        break;
+      case 3:
+        if (keyInput == '#'){
+          keyInputState = 4;
+          calculateNumberRows();
+          break;
+        } else if (keyInput == 'B'){
+          resetInput();
+          break;
+        }
+        break;
+      case 4:
+        if (keyInput == 'B'){
+          resetInput();
+          break;
+        }      
+        break;
+    }  
+}
+
+void calculateNumberAmount(){
+  if (ones == -1 && tens == -1){
+    amount = hundreds;
+  } else if (ones == -1) {
+    amount = (10*hundreds) + tens;
+  } else {
+    amount = (100*hundreds) + (10*tens) + ones;
+  }
+
+  hundreds = -1;
+  tens = -1;
+  ones = -1;
+
+  lcd.setCursor(0, 1);
+  lcd.print(amount);
+  lcd.setCursor(0, 2);
+  lcd.print("Saved");
+}
+
+void calculateNumberRows(){
+  if (ones == -1 && tens == -1){
+    rows = hundreds;
+  } else if (ones == -1) {
+    rows = (10*hundreds) + tens;
+  } else {
+    rows = (100*hundreds) + (10*tens) + ones;
+  }
+
+  hundreds = -1;
+  tens = -1;
+  ones = -1;
+
+  lcd.setCursor(0, 1);
+  lcd.print(rows);
+  lcd.setCursor(0, 2);
+  lcd.print("Saved");
+}
+
+void resetInput(){
+  hundreds = -1;
+  tens = -1;
+  ones = -1;
+    
+  clearLCDRow(1);
+  clearLCDRow(2);
+  lcd.setCursor(0, 1);
+  keyInputState = 0;
+}
+
+void clearLCDRow(int rowNumber){
+  lcd.setCursor(0, rowNumber);
+  lcd.print("                   ");
 }
 
 
